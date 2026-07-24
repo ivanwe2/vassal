@@ -1,0 +1,14 @@
+.vassal/state/
+.vassal/inbox/
+.vassal/tmp/
+# The ledger IS committed. It is the audit trail and the eval set.
+grammar/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+*.egg-info/
+.env
+.DS_Store

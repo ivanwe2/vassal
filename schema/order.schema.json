@@ -1,0 +1,323 @@
+{
+  "$defs": {
+    "Action": {
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/ToolName"
+        },
+        "args": {
+          "additionalProperties": true,
+          "description": "Tool-specific arguments. Validated by the executor's tool binding, which is the security boundary --- not here.",
+          "title": "Args",
+          "type": "object"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional per-action context for the human reviewer.",
+          "title": "Note"
+        }
+      },
+      "required": [
+        "tool",
+        "args"
+      ],
+      "title": "Action",
+      "type": "object"
+    },
+    "Budget": {
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "default": 600,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        },
+        "max_diff_lines": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exceeding this escalates rather than proceeding. Keeps orders reviewable on a phone.",
+          "title": "Max Diff Lines"
+        }
+      },
+      "title": "Budget",
+      "type": "object"
+    },
+    "OnFailure": {
+      "enum": [
+        "retry",
+        "escalate",
+        "halt"
+      ],
+      "title": "OnFailure",
+      "type": "string"
+    },
+    "Precondition": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/PreconditionType"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Precondition",
+      "type": "object"
+    },
+    "PreconditionType": {
+      "enum": [
+        "file_exists",
+        "file_absent",
+        "command_succeeds",
+        "git_clean",
+        "path_within_worktree"
+      ],
+      "title": "PreconditionType",
+      "type": "string"
+    },
+    "Rollback": {
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "$ref": "#/$defs/RollbackStrategy"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        }
+      },
+      "required": [
+        "strategy"
+      ],
+      "title": "Rollback",
+      "type": "object"
+    },
+    "RollbackStrategy": {
+      "enum": [
+        "git_checkout",
+        "git_stash",
+        "command",
+        "none"
+      ],
+      "title": "RollbackStrategy",
+      "type": "string"
+    },
+    "Tier": {
+      "description": "Blast radius. Assign the HIGHEST tier any action in the order reaches.\n\nUnder-tiering is a correctness failure, not a style issue: it is the bug\nthat reaches production as an unreviewed destructive action.",
+      "enum": [
+        0,
+        1,
+        2
+      ],
+      "title": "Tier",
+      "type": "integer"
+    },
+    "ToolName": {
+      "enum": [
+        "read_file",
+        "grep",
+        "glob",
+        "write_file",
+        "edit_file",
+        "create_file",
+        "run_command"
+      ],
+      "title": "ToolName",
+      "type": "string"
+    },
+    "Verification": {
+      "additionalProperties": false,
+      "description": "Ground truth for whether an order succeeded.\n\nWritten by the planner, run by the harness in a subprocess neither model\ncontrols, evaluated by neither model. A verification command that passes\nregardless of this order's outcome is worse than none at all, because it\nmanufactures confidence.",
+      "properties": {
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "expect_exit_code": {
+          "default": 0,
+          "title": "Expect Exit Code",
+          "type": "integer"
+        },
+        "timeout_s": {
+          "default": 300,
+          "maximum": 1800,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        },
+        "detects": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What specific failure this catches. Hand-reviewed in Phase 1; if it cannot be stated concretely, the verification is decorative.",
+          "title": "Detects"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "Verification",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One unit of work a local executor can perform without interpretation.",
+  "properties": {
+    "order_id": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "title": "Order Id",
+      "type": "string"
+    },
+    "plan_id": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "seq": {
+      "description": "1-based. Used to plot FPER by step index.",
+      "minimum": 1,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "tier": {
+      "$ref": "#/$defs/Tier"
+    },
+    "intent": {
+      "description": "One line, imperative.",
+      "maxLength": 120,
+      "title": "Intent",
+      "type": "string"
+    },
+    "rationale": {
+      "description": "Why this step, for a distracted human reviewing on a phone. Plain language. Do not restate the intent.",
+      "maxLength": 280,
+      "title": "Rationale",
+      "type": "string"
+    },
+    "preconditions": {
+      "items": {
+        "$ref": "#/$defs/Precondition"
+      },
+      "title": "Preconditions",
+      "type": "array"
+    },
+    "actions": {
+      "items": {
+        "$ref": "#/$defs/Action"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Actions",
+      "type": "array"
+    },
+    "verification": {
+      "$ref": "#/$defs/Verification"
+    },
+    "on_failure": {
+      "$ref": "#/$defs/OnFailure"
+    },
+    "budget": {
+      "$ref": "#/$defs/Budget"
+    },
+    "rollback": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Rollback"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "context_refs": {
+      "description": "Paths or ledger IDs to read for context. Orders must otherwise be self-contained: the executor has a small context window and no memory of the plan.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Context Refs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "order_id",
+    "plan_id",
+    "seq",
+    "tier",
+    "intent",
+    "rationale",
+    "actions",
+    "verification",
+    "on_failure",
+    "budget"
+  ],
+  "title": "Order",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OWNER/vassal/schema/order.schema.json"
+}

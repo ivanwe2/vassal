@@ -1,0 +1,99 @@
+{
+  "$defs": {
+    "MessageType": {
+      "enum": [
+        "ORDER",
+        "REPORT",
+        "ESCALATION",
+        "DECISION",
+        "ACK",
+        "HALT"
+      ],
+      "title": "MessageType",
+      "type": "string"
+    },
+    "Party": {
+      "enum": [
+        "planner",
+        "compiler",
+        "executor",
+        "human"
+      ],
+      "title": "Party",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Transport wrapper. One JSON object per file, named ``<ulid>.json``.",
+  "properties": {
+    "v": {
+      "const": 1,
+      "default": 1,
+      "title": "V",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "type": {
+      "$ref": "#/$defs/MessageType"
+    },
+    "ts": {
+      "description": "RFC 3339 UTC, millisecond precision.",
+      "title": "Ts",
+      "type": "string"
+    },
+    "from": {
+      "$ref": "#/$defs/Party"
+    },
+    "to": {
+      "$ref": "#/$defs/Party"
+    },
+    "plan_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plan Id"
+    },
+    "corr_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The id this responds to. Reports must set it.",
+      "title": "Corr Id"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "ts",
+    "from",
+    "to",
+    "payload"
+  ],
+  "title": "Envelope",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OWNER/vassal/schema/envelope.schema.json"
+}

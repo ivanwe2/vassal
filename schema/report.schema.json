@@ -1,0 +1,299 @@
+{
+  "$defs": {
+    "Changes": {
+      "additionalProperties": false,
+      "description": "What changed on disk, read from git --- not from the model's recollection.",
+      "properties": {
+        "files_changed": {
+          "default": 0,
+          "title": "Files Changed",
+          "type": "integer"
+        },
+        "insertions": {
+          "default": 0,
+          "title": "Insertions",
+          "type": "integer"
+        },
+        "deletions": {
+          "default": 0,
+          "title": "Deletions",
+          "type": "integer"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "diff_truncated": {
+          "default": false,
+          "title": "Diff Truncated",
+          "type": "boolean"
+        }
+      },
+      "title": "Changes",
+      "type": "object"
+    },
+    "Escalation": {
+      "additionalProperties": false,
+      "properties": {
+        "needed": {
+          "title": "Needed",
+          "type": "boolean"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EscalationReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Written for the PLANNER, not the human. Observed facts only --- no hypotheses about intent.",
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "needed"
+      ],
+      "title": "Escalation",
+      "type": "object"
+    },
+    "EscalationReason": {
+      "enum": [
+        "verification_failed_repeatedly",
+        "verification_could_not_run",
+        "precondition_unsatisfiable",
+        "order_incoherent",
+        "tool_denied_by_tier",
+        "budget_exhausted",
+        "diff_ceiling_exceeded",
+        "unexpected_repo_state",
+        "external_error"
+      ],
+      "title": "EscalationReason",
+      "type": "string"
+    },
+    "ExecutorInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "runtime_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime S"
+        },
+        "tokens_in": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens In"
+        },
+        "tokens_out": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokens Out"
+        },
+        "grammar_enforced": {
+          "default": false,
+          "description": "Whether constrained decoding was active. False invalidates the run for Phase 2 measurement purposes.",
+          "title": "Grammar Enforced",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "ExecutorInfo",
+      "type": "object"
+    },
+    "ReportStatus": {
+      "enum": [
+        "success",
+        "failure",
+        "precondition_failed",
+        "refused",
+        "timeout",
+        "budget_exceeded",
+        "halted"
+      ],
+      "title": "ReportStatus",
+      "type": "string"
+    },
+    "VerificationResult": {
+      "additionalProperties": false,
+      "description": "``ran`` and ``passed`` are separate on purpose.\n\nA verification command that could not execute --- missing binary, bad path,\nwrong cwd --- is NOT a failed verification. Collapsing those two states is\nthe single most dangerous bug this system can have, because it turns \"I\ndon't know\" into \"it's fine\" or \"it's broken\" at random.",
+      "properties": {
+        "ran": {
+          "title": "Ran",
+          "type": "boolean"
+        },
+        "passed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "null when ran is false. Never infer this.",
+          "title": "Passed"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "stdout_tail": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Stdout Tail",
+          "type": "string"
+        },
+        "stderr_tail": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Stderr Tail",
+          "type": "string"
+        },
+        "duration_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration S"
+        }
+      },
+      "required": [
+        "ran"
+      ],
+      "title": "VerificationResult",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The executor's structured result for exactly one order.",
+  "properties": {
+    "report_id": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "title": "Report Id",
+      "type": "string"
+    },
+    "order_id": {
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "title": "Order Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ReportStatus"
+    },
+    "attempts": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Attempts",
+      "type": "integer"
+    },
+    "verification": {
+      "$ref": "#/$defs/VerificationResult"
+    },
+    "changes": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Changes"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "actions_completed": {
+      "default": 0,
+      "title": "Actions Completed",
+      "type": "integer"
+    },
+    "escalation": {
+      "$ref": "#/$defs/Escalation"
+    },
+    "executor": {
+      "$ref": "#/$defs/ExecutorInfo"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Free text. Never load-bearing. No control flow may read this.",
+      "title": "Notes"
+    }
+  },
+  "required": [
+    "report_id",
+    "order_id",
+    "status",
+    "verification",
+    "executor"
+  ],
+  "title": "Report",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OWNER/vassal/schema/report.schema.json"
+}
