@@ -1,0 +1,30 @@
+{
+  "order_id": "01J9XKQ2H8F3M4N5P6Q7R8S9T0",
+  "plan_id": "01J9XKQ2H8F3M4N5P6Q7R8S9T1",
+  "seq": 1,
+  "tier": 0,
+  "intent": "read the auth module",
+  "rationale": "confirm the failing test is the one we think it is",
+  "preconditions": [],
+  "actions": [
+    {
+      "tool": "read_file",
+      "args": {"path": "src/auth.py"},
+      "note": null
+    }
+  ],
+  "verification": {
+    "command": "test -f src/auth.py",
+    "expect_exit_code": 0,
+    "timeout_s": 30,
+    "detects": "auth module exists on disk"
+  },
+  "on_failure": "escalate",
+  "budget": {
+    "max_attempts": 1,
+    "timeout_s": 600,
+    "max_diff_lines": null
+  },
+  "rollback": null,
+  "context_refs": []
+}
