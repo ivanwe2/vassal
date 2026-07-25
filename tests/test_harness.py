@@ -5,7 +5,8 @@ Both the planner and executor are replaced by deterministic stubs that read
 fixtures from disk and return canned messages.
 
 Exit criteria:
-1. 1000-iteration concurrency run with zero torn reads, zero lost messages, zero corrupted files
+1. 1000-iteration concurrency run with zero torn reads, zero lost messages,
+   zero corrupted files
 2. Malformed fixtures rejected with specific errors (not crashes)
 3. Kill switch clean 10/10
 4. Ledger replay reconstructs system state from disk alone
@@ -15,23 +16,15 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import time
 from pathlib import Path
-from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from vassal.harness import (
     Harness,
     HarnessCorrupt,
-    HarnessError,
     HarnessHalted,
     HarnessLocked,
-    HaltError,
-    LedgerError,
-    LockError,
     _write_atomic,
 )
 from vassal.models import (
@@ -40,20 +33,14 @@ from vassal.models import (
     Decision,
     DecisionKind,
     DecisionReason,
-    Envelope,
-    Escalation,
     EscalationReason,
-    MessageType,
     OnFailure,
     Order,
     Party,
     Report,
-    Rollback,
-    RollbackStrategy,
     Tier,
     ToolName,
     Verification,
-    VerificationResult,
 )
 
 
@@ -105,7 +92,8 @@ class TestKillSwitch:
     """Test the kill switch (state/halt).
 
     Rule 5: Check state/halt before every action. The kill switch is a
-    file-existence check — precisely so that it works when nothing else does.
+    file-existence check -- precisely so that it works when nothing else
+    does.
     """
 
     def test_initially_not_halted(self, harness: Harness):
@@ -133,11 +121,11 @@ class TestKillSwitch:
     def test_halt_clean_10_times(self, harness: Harness):
         """Kill switch works 10/10 times.
 
-        Exit criterion: Kill switch clean 10 times out of 10 — state/halt
+        Exit criterion: Kill switch clean 10 times out of 10 -- state/halt
         appears, the run stops at the next check, and the tree is left
         inspectable.
         """
-        for i in range(10):
+        for _ in range(10):
             harness.halt()
             assert harness.is_halted()
             harness.clear_halt()
@@ -179,7 +167,7 @@ class TestLockProtocol:
         with pytest.raises(HarnessLocked, match="lock"):
             harness.acquire_lock()
 
-    def test_release_without_acquire_raises(self, harness: Harness):
+    def test_release_without_acquire(self, harness: Harness):
         """Releasing without acquiring is idempotent (no error)."""
         harness.release_lock()  # Should not raise
 
@@ -207,29 +195,31 @@ class TestAtomicWrites:
     def test_write_atomic_is_atomic(self, tmp_path: Path):
         """Writes are atomic: no torn reads possible."""
         path = tmp_path / "test.json"
-        # Write a large payload
         payload = json.dumps({"data": "x" * 10000}).encode()
         _write_atomic(path, payload)
-        # Read it back — should be complete
         content = path.read_bytes()
         assert content == payload
 
     def test_write_atomic_handles_concurrent_write(self, tmp_path: Path):
         """_write_atomic atomically replaces an existing file."""
-        # Verify that a previous write is replaced atomically
+        path = tmp_path / "test.json"
+        path.write_text('{"old": true}')
+        _write_atomic(path, b'{"new": true}')
+        assert path.read_text() == '{"new": true}'
+
+    def test_write_atomic_partial_write_protected(self, tmp_path: Path):
+        """A partial write (crash during write) leaves no trace."""
         path = tmp_path / "test.json"
         path.write_text('{"old": true}')
 
         _write_atomic(path, b'{"new": true}')
         assert path.read_text() == '{"new": true}'
 
-    def test_write_atomic_partial_write_protected(self, tmp_path: Path):
-        """A partial write (crash during write) leaves no trace."""
-        # This is hard to test directly, but we verify the pattern:
-        # _write_atomic writes to .tmp, then renames. If it crashes
-        # between write and rename, the .tmp file is left but the
-        # original file is untouched.
-        pass  # Covered by the design; not easily testable without process kill
+        # Verify no .tmp file remains after successful write
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert len(tmp_files) == 0, (
+            "No .tmp files should remain after successful write"
+        )
 
 
 class TestEnvelopeIO:
@@ -285,13 +275,13 @@ class TestEnvelopeIO:
     def test_consume_message(self, harness: Harness, golden_order: Order):
         """Can consume a message (move to archive)."""
         harness.produce_order(golden_order)
-        envelope, archive_path = harness.consume_message(
+        _, archive_path = harness.consume_message(
             Party.EXECUTOR, golden_order.order_id
         )
-        # Message should be in archive
         assert archive_path.exists()
-        # Message should not be in inbox
-        assert not (harness.inbox_executor / f"{golden_order.order_id}.json").exists()
+        assert not (
+            harness.inbox_executor / f"{golden_order.order_id}.json"
+        ).exists()
 
     def test_consume_nonexistent_raises(self, harness: Harness):
         """Consuming a non-existent message raises HarnessCorrupt."""
@@ -318,7 +308,10 @@ class TestLedger:
     def test_multiple_appends(self, harness: Harness):
         """Multiple appends accumulate."""
         for i in range(5):
-            entry = {"type": "ORDER", "order_id": f"01J9XKQ2H8F3M4N5P6Q7R8S9T{i}"}
+            entry = {
+                "type": "ORDER",
+                "order_id": f"01J9XKQ2H8F3M4N5P6Q7R8S9T{i}",
+            }
             harness.append_to_ledger(entry)
         entries = harness.read_ledger()
         assert len(entries) == 5
@@ -330,11 +323,9 @@ class TestLedger:
         alone. If state lives anywhere that is not the ledger, this is where
         you find out.
         """
-        # Append an order to the ledger
         order_data = golden_order.model_dump()
         harness.append_to_ledger({"type": "ORDER", **order_data})
 
-        # Replay
         state = harness.replay_state()
         assert "01J9XKQ2H8F3M4N5P6Q7R8S9T0" in state["orders"]
         assert state["orders"]["01J9XKQ2H8F3M4N5P6Q7R8S9T0"]["seq"] == 1
@@ -368,7 +359,12 @@ class TestMalformedFixtures:
             ("malformed_truncated.json", HarnessCorrupt),
         ],
     )
-    def test_malformed_rejected(self, harness: Harness, fixture_name: str, expected_error: type[Exception]):
+    def test_malformed_rejected(
+        self,
+        harness: Harness,
+        fixture_name: str,
+        expected_error: type[Exception],
+    ):
         """Malformed fixtures are rejected with HarnessCorrupt, not crashes."""
         fixture_path = Path(__file__).parent / "fixtures" / fixture_name
         with pytest.raises(expected_error):
@@ -384,10 +380,11 @@ class TestConcurrency:
 
     def test_1000_iterations(self, harness: Harness):
         """1000 iterations with zero errors."""
-        import ulid
+        from vassal.harness import _ulid
+
         errors = []
         for i in range(1000):
-            order_id = str(ulid.ulid())
+            order_id = _ulid()
             order = Order(
                 order_id=order_id,
                 plan_id="01J9XKQ2H8F3M4N5P6Q7R8S9T0",
@@ -395,7 +392,12 @@ class TestConcurrency:
                 tier=Tier.READ_ONLY,
                 intent=f"test iteration {i}",
                 rationale="concurrency test",
-                actions=[Action(tool=ToolName.READ_FILE, args={"path": "test.txt"})],
+                actions=[
+                    Action(
+                        tool=ToolName.READ_FILE,
+                        args={"path": "test.txt"},
+                    )
+                ],
                 verification=Verification(command="true"),
                 on_failure=OnFailure.ESCALATE,
                 budget=Budget(),
@@ -404,9 +406,14 @@ class TestConcurrency:
                 harness.produce_order(order)
                 messages = harness.read_inbox(Party.EXECUTOR)
                 if len(messages) != i + 1:
-                    errors.append(f"Iteration {i}: expected {i+1} messages, got {len(messages)}")
+                    errors.append(
+                        f"Iteration {i}: expected {i + 1} messages, "
+                        f"got {len(messages)}"
+                    )
             except Exception as e:
-                errors.append(f"Iteration {i}: {type(e).__name__}: {e}")
+                errors.append(
+                    f"Iteration {i}: {type(e).__name__}: {e}"
+                )
 
         assert errors == [], f"Errors in 1000 iterations: {errors}"
 
@@ -414,7 +421,9 @@ class TestConcurrency:
 class TestClear:
     """Test harness cleanup between test runs."""
 
-    def test_clear_removes_runtime_state(self, harness: Harness, golden_order: Order):
+    def test_clear_removes_runtime_state(
+        self, harness: Harness, golden_order: Order
+    ):
         """clear() removes all runtime state."""
         harness.produce_order(golden_order)
         harness.halt()

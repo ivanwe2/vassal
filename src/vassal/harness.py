@@ -3,7 +3,7 @@
 Files on disk are the message bus. This module implements the five rules from
 docs/PROTOCOL.md:
 
-1. Atomic writes only (tmp → fsync → rename)
+1. Atomic writes only (tmp -> fsync -> rename)
 2. Move, never delete (archive on consume)
 3. One order in flight (O_EXCL lock)
 4. Ledger append is the commit point
@@ -18,20 +18,17 @@ from __future__ import annotations
 
 import json
 import os
-import stat
-import tempfile
 import time
-import ulid
-from datetime import datetime, timezone
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
 from vassal.models import (
+    ULID,
     Decision,
-    DecisionKind,
-    DecisionReason,
     Envelope,
     Escalation,
     EscalationReason,
@@ -39,8 +36,10 @@ from vassal.models import (
     Order,
     Party,
     Report,
-    ULID,
 )
+
+# Crockford Base32 alphabet for ULID encoding, as pinned in models.ULID.
+_ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 class HarnessError(Exception):
@@ -81,16 +80,31 @@ class HaltError(HarnessError):
 
 def _now_rfc3339() -> str:
     """Current UTC time in RFC 3339 with millisecond precision."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _ulid() -> ULID:
-    """Generate a ULID for a new message using the ulid library."""
-    return str(ulid.ulid())
+    """Generate a ULID using stdlib only (~12 lines vs external dep).
+
+    48-bit timestamp + 80-bit random, encoded in Crockford Base32.
+    """
+    timestamp = int(time.time() * 1000)
+    random_bytes = os.urandom(10)
+    parts: list[str] = []
+
+    for _ in range(10):
+        parts.append(_ULID_ALPHABET[timestamp & 0x1F])
+        timestamp >>= 5
+
+    for byte in random_bytes:
+        parts.append(_ULID_ALPHABET[byte & 0x1F])
+        parts.append(_ULID_ALPHABET[(byte >> 5) | ((byte & 0x1F) << 3)])
+
+    return "".join(parts)
 
 
 def _write_atomic(path: Path, content: bytes) -> None:
-    """Write content atomically: tmp → fsync → rename.
+    """Write content atomically: tmp -> fsync -> rename.
 
     Rule 1: Never write into an inbox directly. Write to tmp, fsync, then
     rename into place. A partial write is visible to readers; rename within
@@ -108,23 +122,14 @@ def _write_atomic(path: Path, content: bytes) -> None:
         os.close(fd)
         fd = -1
         os.rename(str(tmp_path), str(path))
-    except FileExistsError:
-        # Another process wrote between our O_EXCL and our rename. This is
-        # a race — the message already exists, which means a concurrent
-        # writer is violating Rule 3 (one order in flight). Hard error.
-        if fd >= 0:
-            os.close(fd)
-        raise HarnessError(
-            f"Concurrent write to {path}; another process should not be "
-            "writing to an inbox while we are. This indicates a lock protocol "
-            "violation."
-        )
+    except OSError as e:
+        raise AtomicWriteError(
+            f"Atomic write to {path} failed: {e}"
+        ) from e
     finally:
-        if fd >= 0:
-            try:
+        with suppress(OSError):
+            if fd >= 0:
                 os.close(fd)
-            except OSError:
-                pass
 
 
 def _move_atomic(src: Path, dst: Path) -> None:
@@ -137,11 +142,11 @@ def _move_atomic(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.rename(str(src), str(dst))
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         raise HarnessCorrupt(
             f"Source {src} does not exist; cannot move. Possible torn read "
             "or premature deletion."
-        )
+        ) from e
 
 
 class Harness:
@@ -261,16 +266,18 @@ class Harness:
 
         lock = self.lock_path()
         try:
-            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            fd = os.open(
+                str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+            )
             os.write(fd, str(os.getpid()).encode())
             os.fsync(fd)
             os.close(fd)
-        except FileExistsError:
+        except FileExistsError as _e:
             # Another process holds the lock. One order in flight.
             raise HarnessLocked(
                 f"Lock {lock} exists; another process has the order in flight. "
                 "Do not wait — fail loudly."
-            )
+            ) from _e
         except OSError as e:
             raise LockError(f"Failed to acquire lock: {e}") from e
 
@@ -298,8 +305,8 @@ class Harness:
         """
         try:
             content = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            raise HarnessCorrupt(f"Envelope not found: {path}")
+        except FileNotFoundError as e:
+            raise HarnessCorrupt(f"Envelope not found: {path}") from e
         except OSError as e:
             raise HarnessCorrupt(
                 f"Failed to read envelope {path}: {e}"
@@ -332,7 +339,9 @@ class Harness:
         Returns the path where the envelope was written.
         """
         path = directory / f"{envelope.id}.json"
-        content = envelope.model_dump_json(by_alias=True, indent=2).encode("utf-8")
+        content = envelope.model_dump_json(
+            by_alias=True, indent=2
+        ).encode("utf-8")
         _write_atomic(path, content)
         return path
 
@@ -351,12 +360,11 @@ class Harness:
         """Get the inbox directory for a party."""
         if party == Party.EXECUTOR:
             return self.inbox_executor
-        elif party == Party.PLANNER:
+        if party == Party.PLANNER:
             return self.inbox_planner
-        elif party == Party.HUMAN:
+        if party == Party.HUMAN:
             return self.inbox_human
-        else:
-            raise ValueError(f"Parties do not have inboxes: {party}")
+        raise ValueError(f"Parties do not have inboxes: {party}")
 
     def consume_message(
         self, party: Party, message_id: str
@@ -365,7 +373,15 @@ class Harness:
 
         Rule 2: Move, never delete. The message is renamed to archive/.
         Returns the parsed envelope and the new archive path.
+
+        Rule 4: Ledger append is the commit point.
+        Rule 5: Halt check before every action.
         """
+        if self.is_halted():
+            raise HarnessHalted(
+                "Cannot consume message: system is halted"
+            )
+
         inbox = self._inbox_for(party)
         src = inbox / f"{message_id}.json"
 
@@ -382,13 +398,23 @@ class Harness:
         )
         dst = archive_dir / f"{message_id}.json"
         _move_atomic(src, dst)
+
+        # Rule 4: commit through ledger
+        self.append_to_ledger({"type": "CONSUME", "message_id": message_id})
+
         return envelope, dst
 
     def produce_order(self, order: Order) -> Path:
         """Produce an order into the executor inbox.
 
         The planner writes orders here for the executor to pick up.
+
+        Rule 4: Ledger append is the commit point.
+        Rule 5: Halt check before every action.
         """
+        if self.is_halted():
+            raise HarnessHalted("Cannot produce order: system is halted")
+
         envelope = Envelope(
             v=1,
             id=order.order_id,
@@ -399,13 +425,31 @@ class Harness:
             plan_id=order.plan_id,
             payload=order.model_dump(),
         )
-        return self._write_envelope(envelope, self.inbox_executor)
+        path = self._write_envelope(envelope, self.inbox_executor)
 
-    def produce_report(self, report: Report) -> Path:
+        # Rule 4: commit through ledger
+        self.append_to_ledger({
+            "type": "ORDER",
+            **order.model_dump(),
+        })
+
+        return path
+
+    def produce_report(self, report: Report, plan_id: str | None = None) -> Path:
         """Produce a report into the planner inbox.
 
         The executor writes reports here for the planner to pick up.
+
+        The plan_id is threaded through from the order (Report carries no
+        plan_id of its own). Without it, metrics that group by plan are
+        silently wrong.
+
+        Rule 4: Ledger append is the commit point.
+        Rule 5: Halt check before every action.
         """
+        if self.is_halted():
+            raise HarnessHalted("Cannot produce report: system is halted")
+
         envelope = Envelope(
             v=1,
             id=report.report_id,
@@ -413,16 +457,31 @@ class Harness:
             ts=_now_rfc3339(),
             from_=Party.EXECUTOR,
             to=Party.PLANNER,
-            plan_id=report.order_id,  # Uses order_id as plan context
+            plan_id=plan_id,
             corr_id=report.order_id,
             payload=report.model_dump(),
         )
-        return self._write_envelope(envelope, self.inbox_planner)
+        path = self._write_envelope(envelope, self.inbox_planner)
+
+        # Rule 4: commit through ledger
+        self.append_to_ledger({
+            "type": "REPORT",
+            **report.model_dump(),
+        })
+
+        return path
 
     def produce_escalation(
         self, reason: EscalationReason, detail: str, order_id: str
     ) -> Path:
-        """Produce an escalation into the human inbox."""
+        """Produce an escalation into the human inbox.
+
+        Rule 4: Ledger append is the commit point.
+        Rule 5: Halt check before every action.
+        """
+        if self.is_halted():
+            raise HarnessHalted("Cannot produce escalation: system is halted")
+
         escalation = Escalation(
             needed=True,
             reason_code=reason,
@@ -442,13 +501,30 @@ class Harness:
                 "escalation": escalation.model_dump(),
             },
         )
-        return self._write_envelope(envelope, self.inbox_human)
+        path = self._write_envelope(envelope, self.inbox_human)
+
+        # Rule 4: commit through ledger
+        self.append_to_ledger({
+            "type": "ESCALATION",
+            "order_id": order_id,
+            "reason_code": reason,
+            "detail": escalation.detail,
+        })
+
+        return path
 
     def produce_decision(
         self,
         decision: Decision,
     ) -> Path:
-        """Produce a human decision into the planner inbox."""
+        """Produce a human decision into the planner inbox.
+
+        Rule 4: Ledger append is the commit point.
+        Rule 5: Halt check before every action.
+        """
+        if self.is_halted():
+            raise HarnessHalted("Cannot produce decision: system is halted")
+
         envelope = Envelope(
             v=1,
             id=decision.decision_id,
@@ -460,14 +536,22 @@ class Harness:
             corr_id=decision.order_id,
             payload=decision.model_dump(),
         )
-        return self._write_envelope(envelope, self.inbox_planner)
+        path = self._write_envelope(envelope, self.inbox_planner)
+
+        # Rule 4: commit through ledger
+        self.append_to_ledger({
+            "type": "DECISION",
+            **decision.model_dump(),
+        })
+
+        return path
 
     # --- Ledger ---
 
     def _ledger_path(self, date: str | None = None) -> Path:
         """Get the ledger file path for a date. Defaults to today."""
         if date is None:
-            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date = datetime.now(UTC).strftime("%Y-%m-%d")
         return self.ledger_dir / f"{date}.jsonl"
 
     def append_to_ledger(self, entry: dict[str, Any]) -> Path:
@@ -560,22 +644,26 @@ class Harness:
     def list_archive(self, party: Party) -> list[str]:
         """List archived message IDs."""
         archive = (
-            self.archive_orders if party == Party.EXECUTOR else self.archive_reports
+            self.archive_orders if party == Party.EXECUTOR
+            else self.archive_reports
         )
         if not archive.exists():
             return []
         return sorted([p.stem for p in archive.glob("*.json")])
 
     def clear(self) -> None:
-        """Remove all runtime state. Used between test runs."""
+        """Remove all runtime state. Used between test runs.
+
+        Preserves the ledger (committed audit trail) per Rule 2.
+        """
         import shutil
 
         for d in [
             self.root / "inbox",
             self.root / "outbox",
             self.root / "state",
-            self.root / "ledger",
             self.root / "archive",
         ]:
             if d.exists():
                 shutil.rmtree(d)
+        # Ledger is NOT removed — it is the committed audit trail
