@@ -1,0 +1,8 @@
+{
+  "id": "01J9XKQ2H8F3M4N5P6Q7R8S9T0",
+  "type": "ORDER",
+  "ts": "2024-01-01T00:00:00.000Z",
+  "from": "not_a_party",
+  "to": "executor",
+  "payload": {}
+}

@@ -1,0 +1,23 @@
+{
+  "report_id": "01J9XKQ2H8F3M4N5P6Q7R8S9T2",
+  "order_id": "01J9XKQ2H8F3M4N5P6Q7R8S9T0",
+  "status": "success",
+  "attempts": 1,
+  "verification": {
+    "ran": true,
+    "passed": true,
+    "exit_code": 0,
+    "stdout_tail": "",
+    "stderr_tail": "",
+    "duration_s": 0.5
+  },
+  "changes": null,
+  "actions_completed": 1,
+  "escalation": {
+    "needed": false
+  },
+  "executor": {
+    "model": "hermes-4-70b",
+    "grammar_enforced": true
+  }
+}
