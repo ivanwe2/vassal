@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,7 @@ from vassal.harness import (
     HarnessCorrupt,
     HarnessHalted,
     HarnessLocked,
+    _ulid,
     _write_atomic,
 )
 from vassal.models import (
@@ -86,6 +89,39 @@ class TestDirectorySetup:
         h1 = Harness(tmp_path)
         h2 = Harness(tmp_path)
         assert h1.root == h2.root
+
+
+class TestULID:
+    """Test ULID generation properties.
+
+    PROTOCOL.md: 'ULIDs are load-bearing, not decorative. They sort
+    lexicographically by creation time, which means a plain directory
+    listing is an ordered queue.'
+    """
+
+    def test_ulid_length(self):
+        """Generated ULIDs are exactly 26 characters."""
+        ulid = _ulid()
+        assert len(ulid) == 26, f"ULID length {len(ulid)} != 26"
+
+    def test_ulid_pattern(self):
+        """Generated ULIDs match the Crockford Base32 pattern."""
+        pattern = r'^[0-9A-HJKMNP-TV-Z]{26}$'
+        ulid = _ulid()
+        assert re.match(pattern, ulid), f"ULID '{ulid}' doesn't match pattern"
+
+    def test_ulid_uniqueness(self):
+        """Generated ULIDs are unique."""
+        ulids = {_ulid() for _ in range(10000)}
+        assert len(ulids) == 10000, "ULIDs are not unique"
+
+    def test_ulid_lexicographic_order(self):
+        """Generated ULIDs sort lexicographically in chronological order."""
+        ulids = []
+        for _ in range(10):
+            ulids.append(_ulid())
+            time.sleep(0.01)  # 10ms gap
+        assert sorted(ulids) == ulids, "ULIDs don't sort chronologically"
 
 
 class TestKillSwitch:
@@ -207,15 +243,14 @@ class TestAtomicWrites:
         _write_atomic(path, b'{"new": true}')
         assert path.read_text() == '{"new": true}'
 
-    def test_write_atomic_partial_write_protected(self, tmp_path: Path):
-        """A partial write (crash during write) leaves no trace."""
+    def test_write_atomic_no_tmp_remaining(self, tmp_path: Path):
+        """No .tmp files remain after successful write."""
         path = tmp_path / "test.json"
         path.write_text('{"old": true}')
 
         _write_atomic(path, b'{"new": true}')
         assert path.read_text() == '{"new": true}'
 
-        # Verify no .tmp file remains after successful write
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert len(tmp_files) == 0, (
             "No .tmp files should remain after successful write"
@@ -323,8 +358,8 @@ class TestLedger:
         alone. If state lives anywhere that is not the ledger, this is where
         you find out.
         """
-        order_data = golden_order.model_dump()
-        harness.append_to_ledger({"type": "ORDER", **order_data})
+        # Use produce_order (which commits to ledger) instead of direct append
+        harness.produce_order(golden_order)
 
         state = harness.replay_state()
         assert "01J9XKQ2H8F3M4N5P6Q7R8S9T0" in state["orders"]
@@ -351,12 +386,12 @@ class TestMalformedFixtures:
     """
 
     @pytest.mark.parametrize(
-        "fixture_name,expected_error",
+        "fixture_name,expected_error,match_pattern",
         [
-            ("malformed_bad_ulid.json", HarnessCorrupt),
-            ("malformed_invalid_type.json", HarnessCorrupt),
-            ("malformed_bad_party.json", HarnessCorrupt),
-            ("malformed_truncated.json", HarnessCorrupt),
+            ("malformed_bad_ulid.json", HarnessCorrupt, "ULID pattern"),
+            ("malformed_invalid_type.json", HarnessCorrupt, "INVALID_TYPE"),
+            ("malformed_bad_party.json", HarnessCorrupt, "Input should be"),
+            ("malformed_truncated.json", HarnessCorrupt, "JSON"),
         ],
     )
     def test_malformed_rejected(
@@ -364,10 +399,11 @@ class TestMalformedFixtures:
         harness: Harness,
         fixture_name: str,
         expected_error: type[Exception],
+        match_pattern: str,
     ):
-        """Malformed fixtures are rejected with HarnessCorrupt, not crashes."""
+        """Malformed fixtures are rejected with HarnessCorrupt and specific message."""
         fixture_path = Path(__file__).parent / "fixtures" / fixture_name
-        with pytest.raises(expected_error):
+        with pytest.raises(expected_error, match=match_pattern):
             harness._read_envelope(fixture_path)
 
 

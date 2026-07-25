@@ -416,12 +416,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ulid"
-version = "1.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/56/d4/6829692e4902d53684b7696cf3d5158f07439ebc4bc3ca7822b5ca173e44/ulid-1.1.tar.gz", hash = "sha256:0943e8a751ec10dfcdb4df2758f96dffbbfbc055d0b49288caf2f92125900d49", size = 1174, upload-time = "2016-08-01T23:00:12.792Z" }
-
-[[package]]
 name = "vassal"
 version = "0.0.1"
 source = { editable = "." }
@@ -429,7 +423,6 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "typer" },
-    { name = "ulid" },
 ]
 
 [package.optional-dependencies]
@@ -449,6 +442,5 @@ requires-dist = [
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "typer", specifier = ">=0.12" },
-    { name = "ulid", specifier = ">=1.1" },
 ]
 provides-extras = ["dev"]

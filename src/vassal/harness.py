@@ -83,24 +83,16 @@ def _now_rfc3339() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def _ulid() -> ULID:
-    """Generate a ULID using stdlib only (~12 lines vs external dep).
+def _ulid() -> str:
+    """48-bit ms timestamp + 80 bits of randomness, Crockford Base32.
 
-    48-bit timestamp + 80-bit random, encoded in Crockford Base32.
+    Most significant character first, so that a plain directory listing is
+    an ordered queue — PROTOCOL.md relies on this, not on a sort key.
     """
-    timestamp = int(time.time() * 1000)
-    random_bytes = os.urandom(10)
-    parts: list[str] = []
-
-    for _ in range(10):
-        parts.append(_ULID_ALPHABET[timestamp & 0x1F])
-        timestamp >>= 5
-
-    for byte in random_bytes:
-        parts.append(_ULID_ALPHABET[byte & 0x1F])
-        parts.append(_ULID_ALPHABET[(byte >> 5) | ((byte & 0x1F) << 3)])
-
-    return "".join(parts)
+    value = (int(time.time() * 1000) << 80) | int.from_bytes(
+        os.urandom(10), "big"
+    )
+    return "".join(_ULID_ALPHABET[(value >> shift) & 0x1F] for shift in range(125, -1, -5))
 
 
 def _write_atomic(path: Path, content: bytes) -> None:
